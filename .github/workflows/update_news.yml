@@ -9,13 +9,18 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      # AGGIORNATO ALLA v4
+      - uses: actions/checkout@v4
+      
+      # AGGIORNATO ALLA v5
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: '3.10' # Ho alzato anche Python alla 3.10 per maggiore stabilità
+          
       - name: Install dependencies
         run: pip install -r requirements.txt
+        
       - name: Run Aggregator
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
