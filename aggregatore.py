@@ -1,19 +1,19 @@
 import feedparser
-import sqlite3
+import psycopg2
 import google.generativeai as genai
 import time
+import os
 
 # ==========================================
-# CONFIGURAZIONE INTELLIGENZA ARTIFICIALE
+# CONFIGURAZIONE SICURA PER IL CLOUD
 # ==========================================
-# INSERISCI QUI LA TUA CHIAVE API DI GOOGLE STUDIO
-CHIAVE_API = "AQ.Ab8RN6JJYCMnbbSEEb178Ec179VN06P_Q4N3_poqkFYPV6zbBQ"
+# Le chiavi ora vengono prese dai "Segreti" di GitHub e Render, non sono più scritte qui!
+CHIAVE_API = os.environ.get("GEMINI_API_KEY")
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
 genai.configure(api_key=CHIAVE_API)
 modello_ai = genai.GenerativeModel('gemini-2.5-flash') 
 
-# ==========================================
-# LISTA GLOBALE DELLE FONTI GEOPOLITICHE
-# ==========================================
 fonti_geopolitiche = [
     # EUROPA
     {"continente": "Europa", "fonte": "BBC Europe", "url": "http://feeds.bbci.co.uk/news/world/europe/rss.xml"},
@@ -51,38 +51,42 @@ fonti_geopolitiche = [
     {"continente": "Oceania e Giappone", "fonte": "RNZ Pacific", "url": "https://www.rnz.co.nz/rss/pacific"}
 ]
 
-# ==========================================
-# FUNZIONI DEL SISTEMA
-# ==========================================
 def chiedi_all_ai(titolo, descrizione, fonte):
-    """L'AI analizza la notizia ed estrae i fatti in un inglese neutrale."""
     prompt = f"""
-    You are an objective and neutral geopolitical analyst.
-    Read the following news item from {fonte}.
+    You are a professional International Geopolitics Analyst.
+    Analyze this news from {fonte}.
+    
     Original Title: {titolo}
-    Brief Description: {descrizione}
+    Description: {descrizione}
     
-    Task:
-    1. Write a clear, objective title in English. Remove any sensationalism or bias from the original source.
-    2. Write a concise summary (maximum 2 sentences) in English. Focus strictly on facts, geopolitical implications, and keep a completely neutral tone.
+    CRITICAL FILTERING RULE:
+    If this news is NOT strictly related to international geopolitics (e.g., local crime, sports, domestic politics), respond ONLY with: IGNORE.
     
-    Respond EXACTLY in this format:
-    TITLE: [Your objective title]
-    SUMMARY: [Your neutral summary]
+    If relevant:
+    1. Write an objective title in English.
+    2. Write a 2-sentence summary focusing on global implications.
+    
+    Format:
+    TITLE: [Title]
+    SUMMARY: [Summary]
     """
     try:
         risposta = modello_ai.generate_content(prompt)
-        return risposta.text
+        testo = risposta.text.strip()
+        if "IGNORE" in testo:
+            return None 
+        return testo
     except Exception as e:
-        return f"TITLE: {titolo}\nSUMMARY: AI Summary unavailable due to error ({e})"
+        print(f"Errore AI: {e}")
+        return None
 
 def setup_database():
-    """Inizializza il database e crea la tabella se non esiste."""
-    connessione = sqlite3.connect('geopolitica.db')
+    """Si connette a Neon (PostgreSQL)"""
+    connessione = psycopg2.connect(DATABASE_URL)
     cursore = connessione.cursor()
     cursore.execute('''
         CREATE TABLE IF NOT EXISTS notizie (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             titolo_originale TEXT,
             link TEXT UNIQUE,
             data_pubblicazione TEXT,
@@ -95,10 +99,7 @@ def setup_database():
     return connessione
 
 def raccogli_notizie():
-    """Motore principale di aggregazione."""
-    print("🌍 Avvio del Global Geopolitical Aggregator...")
-    print("⚠️ Attenzione: l'analisi dell'intero globo richiederà alcuni minuti a causa dei limiti di velocità dell'AI.\n")
-    
+    print("🌍 Avvio del Motore Cloud Mundiview...")
     connessione = setup_database()
     cursore = connessione.cursor()
     
@@ -106,42 +107,37 @@ def raccogli_notizie():
         continente = f["continente"]
         nome_giornale = f["fonte"]
         url_rss = f["url"]
-        
-        print(f"📡 Lettura da: {nome_giornale} ({continente})")
+        print(f"📡 Lettura da: {nome_giornale}")
         
         try:
             feed = feedparser.parse(url_rss)
-            
-            # Estraiamo le prime 2 notizie per ogni fonte (totale 42 notizie per ciclo)
             for articolo in feed.entries[:2]:
                 titolo = articolo.title
                 link = articolo.link
-                descrizione = articolo.get('description', 'No description available')
+                descrizione = articolo.get('description', 'No description')
                 data = articolo.get('published', articolo.get('updated', 'Unknown date'))
                 
-                # Controlla se la notizia è già nel database
-                cursore.execute("SELECT id FROM notizie WHERE link = ?", (link,))
+                # In PostgreSQL si usa %s invece di ?
+                cursore.execute("SELECT id FROM notizie WHERE link = %s", (link,))
                 if cursore.fetchone() is None:
-                    print(f"   🤖 Elaborazione AI in corso per: '{titolo[:30]}...'")
-                    
                     analisi_ai = chiedi_all_ai(titolo, descrizione, nome_giornale)
                     
-                    cursore.execute('''
-                        INSERT INTO notizie (titolo_originale, link, data_pubblicazione, continente, fonte_nome, testo_ai)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    ''', (titolo, link, data, continente, nome_giornale, analisi_ai))
-                    connessione.commit()
-                    
-                    # ⏱️ PAUSA CRITICA: 5 secondi per evitare il blocco (Error 429 Too Many Requests)
-                    time.sleep(5) 
-                else:
-                    print(f"   ⏭️ Già in archivio, passo alla prossima.")
-                
+                    if analisi_ai:
+                        cursore.execute('''
+                            INSERT INTO notizie (titolo_originale, link, data_pubblicazione, continente, fonte_nome, testo_ai)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                        ''', (titolo, link, data, continente, nome_giornale, analisi_ai))
+                        connessione.commit()
+                        print("   ✅ Salvata in Cloud.")
+                        time.sleep(5) 
+                    else:
+                        print("   🗑️ Scartata.")
+                        time.sleep(2)
         except Exception as e:
-            print(f"⚠️ Errore di connessione con {nome_giornale}: {e}")
+            print(f"⚠️ Errore con {nome_giornale}: {e}")
             
     connessione.close()
-    print("\n✅ Analisi globale completata con successo! Dati salvati in geopolitica.db")
+    print("\n✅ Analisi e salvataggio su Neon completato!")
 
 if __name__ == "__main__":
     raccogli_notizie()
