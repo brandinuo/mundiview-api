@@ -9,7 +9,7 @@ import os
 # ==========================================
 # Le chiavi ora vengono prese dai "Segreti" di GitHub e Render, non sono più scritte qui!
 CHIAVE_API = os.environ.get("GEMINI_API_KEY")
-DATABASE_URL = os.environ.get("DATABASE_URL")
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 
 genai.configure(api_key=CHIAVE_API)
 modello_ai = genai.GenerativeModel('gemini-2.5-flash') 
